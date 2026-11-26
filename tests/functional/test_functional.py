@@ -778,6 +778,24 @@ class FunctionalTests(testtools.TestCase):
         }
         self.check_example("nosec.py", expect)
 
+    def test_nosec_multiline_expression(self):
+        """Test a #nosec comment on a multi-line expression's closing line."""
+        expect = {
+            "SEVERITY": {"UNDEFINED": 0, "LOW": 0, "MEDIUM": 0, "HIGH": 0},
+            "CONFIDENCE": {"UNDEFINED": 0, "LOW": 0, "MEDIUM": 0, "HIGH": 0},
+        }
+        self.check_example("nosec_multiline_expression.py", expect)
+
+    def test_nosec_multiline_expression_ignored(self):
+        """Test that --ignore-nosec still reports the suppressed issues."""
+        expect = {
+            "SEVERITY": {"UNDEFINED": 0, "LOW": 2, "MEDIUM": 0, "HIGH": 0},
+            "CONFIDENCE": {"UNDEFINED": 0, "LOW": 0, "MEDIUM": 0, "HIGH": 2},
+        }
+        self.check_example(
+            "nosec_multiline_expression.py", expect, ignore_nosec=True
+        )
+
     def test_baseline_filter(self):
         issue_text = (
             "A Flask app appears to be run with debug=True, which "

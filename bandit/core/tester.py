@@ -2,6 +2,7 @@
 # Copyright 2014 Hewlett-Packard Development Company, L.P.
 #
 # SPDX-License-Identifier: Apache-2.0
+import ast
 import copy
 import logging
 import warnings
@@ -12,6 +13,21 @@ from bandit.core import utils
 
 warnings.formatwarning = utils.warnings_formatter
 LOG = logging.getLogger(__name__)
+
+# Statements whose line range is entirely described by the statement itself.
+# Compound statements (if/for/while/with/try/...) are intentionally excluded:
+# their linerange also covers their body, so honoring a # nosec in their
+# header there would suppress unrelated issues in the body.
+_SIMPLE_STATEMENTS = (
+    ast.Assign,
+    ast.AnnAssign,
+    ast.AugAssign,
+    ast.Delete,
+    ast.Expr,
+    ast.Return,
+    ast.Assert,
+    ast.Raise,
+)
 
 
 class BanditTester:
@@ -137,21 +153,50 @@ class BanditTester:
             else None
         )
         context_tests = utils.get_nosec(self.nosec_lines, context)
+        statement_tests = self._get_statement_nosecs(context)
 
-        # if both are none there were no comments
+        # if all are none there were no comments
         # this is explicitly different from being empty.
         # empty set indicates blanket nosec comment without
         # individual test names or ids
-        if base_tests is None and context_tests is None:
+        if (
+            base_tests is None
+            and context_tests is None
+            and statement_tests is None
+        ):
             nosec_tests_to_skip = None
 
-        # combine tests from current line and context line
-        if base_tests is not None:
-            nosec_tests_to_skip.update(base_tests)
-        if context_tests is not None:
-            nosec_tests_to_skip.update(context_tests)
+        # combine tests from current line, context and enclosing statement
+        for tests in (base_tests, context_tests, statement_tests):
+            if tests is not None:
+                nosec_tests_to_skip.update(tests)
 
         return nosec_tests_to_skip
+
+    def _get_statement_nosecs(self, context):
+        """Get a trailing # nosec comment from the enclosing statement.
+
+        Black formats long expressions across several lines and moves a
+        trailing comment to the closing bracket line.  That line is outside
+        the linerange of the individual nodes that produced the result, but
+        the comment still applies to the whole statement.
+        """
+        if not self.nosec_lines:
+            return None
+
+        node = context.get("node")
+        while node is not None and not isinstance(node, _SIMPLE_STATEMENTS):
+            if isinstance(node, ast.stmt):
+                # Nearest statement is compound; its linerange also covers
+                # its body, so a comment there is not a trailing comment for
+                # this node.
+                return None
+            node = getattr(node, "_bandit_parent", None)
+        if node is None:
+            return None
+
+        last_line = utils.linerange(node)[-1]
+        return self.nosec_lines.get(last_line)
 
     @staticmethod
     def report_error(test, context, error):
